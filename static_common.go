@@ -2,6 +2,7 @@ package vk
 
 import (
 	"bytes"
+	"fmt"
 	"runtime"
 	"unsafe"
 )
@@ -35,18 +36,15 @@ func max(nums ...int) int {
 // Error implements the error interface
 // TODO: A way for commands to indicate if the Result code is an error for that command, or an unexpected return value?
 func (r Result) Error() string {
-	return r.String()
+	return fmt.Sprintf("%d", r)
 }
 
-type vkCommandKey int
 type vkCommand struct {
 	protoName string
 	argCount  int
 	hasReturn bool
 	fnHandle  unsafe.Pointer
 }
-
-var lazyCommands map[vkCommandKey]vkCommand = make(map[vkCommandKey]vkCommand)
 
 var dlHandle unsafe.Pointer
 
@@ -60,7 +58,7 @@ func OverrideDefaultVulkanLibrary(nameOrPath string) {
 	overrideLibName = nameOrPath
 }
 
-func execTrampoline(commandKey vkCommandKey, args ...uintptr) uintptr {
+func execTrampoline(cmd *vkCommand, args ...uintptr) uintptr {
 	if dlHandle == nil {
 		var libName string
 		switch runtime.GOOS {
@@ -71,8 +69,9 @@ func execTrampoline(commandKey vkCommandKey, args ...uintptr) uintptr {
 			// destroying a Vulkan instance.
 			libName = "libMoltenVK.dylib"
 		case "linux":
-			// TODO: Opening/running on linux is completely untested.
-			libName = "libvulkan.1.dylib"
+			// TODO: Running on Linux is tested only to the point of creating and
+			// destroying a Vulkan instance.
+			libName = "libvulkan.so"
 		default:
 			panic("Unsupported GOOS at OpenLibrary: " + runtime.GOOS)
 		}
@@ -86,10 +85,10 @@ func execTrampoline(commandKey vkCommandKey, args ...uintptr) uintptr {
 		C.free(unsafe.Pointer(cstr))
 	}
 
-	cmd := lazyCommands[commandKey]
+	// cmd := lazyCommands[commandKey]
 	if cmd.fnHandle == nil {
 		cmd.fnHandle = C.SymbolFromName(dlHandle, unsafe.Pointer(sys_stringToBytePointer(cmd.protoName)))
-		lazyCommands[commandKey] = cmd
+		// lazyCommands[commandKey] = cmd
 	}
 
 	if len(args) != cmd.argCount {
@@ -126,9 +125,7 @@ func execTrampoline(commandKey vkCommandKey, args ...uintptr) uintptr {
 		panic("Unhandled number of arguments passed for cmd " + cmd.protoName)
 	}
 
-	// Trampoline is always returning a file does not exist error in the second return value, so that error reporting is disabled
-
-	return uintptr(result) //, err
+	return uintptr(result)
 }
 
 func stringToNullTermBytes(s string) *byte {
